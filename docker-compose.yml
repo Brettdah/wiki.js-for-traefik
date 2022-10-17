@@ -1,0 +1,82 @@
+---
+version: '3.1'
+
+# NETWORKS
+networks:
+  proxy:
+    external: true
+  wiki:
+    external: false
+
+# secrets path from the host
+secrets:
+  db_name:
+    file: $PWD/secrets/db_name.secret
+  db_password:
+    file: $PWD/secrets/db_password.secret
+  db_user:
+    file: $PWD/secrets/db_user.secret
+  db_port:
+    file: $PWD/secrets/db_port.secret
+
+
+#SERVICES
+services:
+  db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    secrets:
+      - "db_name"
+      - "db_password"
+      - "db_user"
+    environment:
+      - "POSTGRES_DB_FILE=/run/secrets/db_name"
+      - "POSTGRES_PASSWORD_FILE=/run/secrets/db_password"
+      - "POSTGRES_USER_FILE=/run/secrets/db_user"
+      - "TZ=Europe/Paris"
+    networks:
+      - wiki
+    volumes:
+      - $PWD/data/db:/var/lib/postgresql/data
+
+  wiki:
+    image: requarks/wiki:2
+    depends_on:
+      - db
+    secrets:
+      - "db_name"
+      - "db_password"
+      - "db_user"
+      - "db_port"
+    environment:
+      DB_TYPE: postgres
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: my_user_wikijs
+      DB_NAME: my_db_wikijs
+      DB_PASS_FILE: /run/secrets/db_password
+      TZ: Europe/Paris
+    networks:
+      - proxy
+      - wiki
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges=true
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.middlewares.redirect-https.redirectScheme.scheme=https
+      - traefik.http.middlewares.redirect-https.redirectScheme.permanent=true
+      - traefik.http.routers.wikijs-https.rule=Host(`wikijs.example.com`)
+      - traefik.http.routers.wikijs-https.middlewares=authelia@docker
+      - traefik.http.routers.wikijs-https.entrypoints=https
+      - traefik.http.routers.wikijs-https.tls=true
+      - traefik.http.routers.wikijs-https.service=wikijs
+      - traefik.http.routers.wikijs-http.rule=Host(`wikijs.example.com`)
+      - traefik.http.routers.wikijs-http.entrypoints=http
+      - traefik.http.routers.wikijs-http.middlewares=redirect-https
+      - traefik.http.routers.wikijs-http.service=wikijs
+      - traefik.http.services.wikijs.loadbalancer.server.port=3000
+    volumes:
+      - $PWD/data/wiki/config.yml:/wiki/config.yml
+
